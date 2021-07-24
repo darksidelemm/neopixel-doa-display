@@ -32,6 +32,9 @@ SCALE_NUM_PIXELS = 8
 # For RGBW NeoPixels, simply change the ORDER to RGBW or GRBW.
 PIXEL_ORDER = neopixel.RGB
 
+# HUD Mode - where the display is placed on the dashboard of a car and viewed via reflections from a windscreen.
+HUD_MODE = False
+
 # Initial Brightness of the display.
 BRIGHTNESS = 0.1
 
@@ -44,13 +47,18 @@ CONFIDENCE_MAX = 70
 CONFIDENCE_MIN = 20
 CONFIDENCE_MAX_COL = 160
 CONFIDENCE_MIN_COL = 255
-CLIP_VALUE = 0.3 # Fudge factor to make narrow beams show up well on the display.
+CLIP_VALUE = 0.7 # Fudge factor to make narrow beams show up well on the display.
+
+# Scale settings for the Power Scaleß
+POWER_MIN = 5
+POWER_MAX = 30
+POWER_COL = 1
 
 # 
 BEARING_COL = 80
 
 # Total number of pixels.
-TOTAL_NUM_PIXELS = RING_NUM_PIXELS
+TOTAL_NUM_PIXELS = RING_NUM_PIXELS + SCALE_NUM_PIXELS
 
 # Setup NeoPixels
 pixels = neopixel.NeoPixel(
@@ -120,6 +128,12 @@ def set_ring(color):
     pixels.show()
 
 
+def set_scale(color):
+    for i in range(RING_NUM_PIXELS, TOTAL_NUM_PIXELS):
+        pixels[i] = wheel(color & 255)
+    pixels.show()
+
+
 def map_ring_data(data):
     """ Map an array (assumed to be 0-360 degree values) to the ring."""
     data_np = np.array(data)
@@ -163,24 +177,70 @@ def display_ring_data(data, confidence=50, bearing=None):
 
     pixels.show()
 
+def display_power_value(power):
+    _range = np.linspace(POWER_MIN,POWER_MAX, SCALE_NUM_PIXELS)
 
+
+    for x in range(SCALE_NUM_PIXELS):
+        if HUD_MODE:
+            _pxl = TOTAL_NUM_PIXELS-1-x
+        else:
+            _pxl = RING_NUM_PIXELS+x
+
+        if power >= _range[x]:
+            pixels[_pxl] = wheel(POWER_COL)
+        else:
+            pixels[_pxl] = (0,0,0)
+    
+    pixels.show()
+
+
+
+def slow_test():
+    for i in range(0, TOTAL_NUM_PIXELS):
+        pixels[i] = wheel(0 & 255)
+        pixels.show()
+        time.sleep(0.4)
+        pixels[i] = (0,0,0)
+        pixels.show()
+        time.sleep(0.4)
+    
+    time.sleep(3)
 
 
 def startup():
     """ Perform a Startup 'attract' display"""
-    rainbow_cycle(wait_time=0.0005)
+    rainbow_cycle(wait_time=0.0005, num_pixels=TOTAL_NUM_PIXELS)
     fade_to_black()
 
 
 udp_listener = None
 
-
 def handle_bearing(data):
     _confidence = data['confidence']
     _bearing = data['bearing']
-    _power = data['power']
+    _power = data['power'] # Power is roughly a SNR value.
     _doa_data = data['raw_doa']
+
+    if "source" in data:
+        _source = data["source"]
+    else:
+        _source = "unknown"
+
+    # Reflect bearings direct from a kerberos-sdr across the N-S axis.
+    if _source == "kerberos-sdr":
+        _bearing = 360.0 - _bearing
+        _doa_data = _doa_data[::-1]
+
+    if HUD_MODE:
+        # Flip the data up-down
+        _half_a = _doa_data[len(_doa_data)//2-1::-1]
+        _half_b = _doa_data[len(_doa_data)-1:len(_doa_data)//2-1:-1]
+        _doa_data = _half_a + _half_b
+
     display_ring_data(_doa_data, _confidence, bearing=_bearing)
+    display_power_value(_power)
+
 
 if __name__ == "__main__":
 
@@ -194,7 +254,21 @@ if __name__ == "__main__":
         default=55672,
         help="UDP Port to listen for UDP messages on.",
     )
+    parser.add_argument(
+        "--test", action="store_true", default=False, help="Verbose output."
+    )
+    parser.add_argument(
+        "--hudmode", action="store_true", default=False, help="Enable HUD Mode"
+    )
     args = parser.parse_args()
+
+    if args.hudmode:
+        HUD_MODE = True
+
+    if args.test:
+        while True:
+            slow_test()
+
 
     udp_listener = UDPListener(bearing_callback=handle_bearing, port=args.udp_port)
 
