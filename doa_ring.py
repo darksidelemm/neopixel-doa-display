@@ -38,6 +38,10 @@ HUD_MODE = False
 # Initial Brightness of the display.
 BRIGHTNESS = 0.1
 
+# Compass rose settings.
+ROSE_BRIGHTNESS = 0.04 # Relative brightness.
+ROSE_POINTS = 4 # Number of points
+
 # Maximum and Minimum brightness settings.
 MAX_BRIGHTNESS = 0.2
 MIN_BRIGHTNESS = 0.01
@@ -49,7 +53,7 @@ CONFIDENCE_MAX_COL = 160
 CONFIDENCE_MIN_COL = 255
 CLIP_VALUE = 0.7 # Fudge factor to make narrow beams show up well on the display.
 
-# Scale settings for the Power Scaleß
+# Scale settings for the Power Scale
 POWER_MIN = 5
 POWER_MAX = 30
 POWER_COL = 1
@@ -153,21 +157,34 @@ def map_ring_data(data):
     return list(np.interp(output, [output.min()+CLIP_VALUE*_range, output.max()], [0.00, 1]))
 
 
-def display_ring_data(data, confidence=50, bearing=None):
+def display_ring_data(data, confidence=50, bearing=None, compassrose=True):
     """ Display an array of DoA score vs Bearing data, with a given confidence value. """
 
     # Map the confidence value to a color.
     _color = int(np.interp(confidence, [CONFIDENCE_MIN, CONFIDENCE_MAX], [CONFIDENCE_MIN_COL, CONFIDENCE_MAX_COL]))
     _color = wheel(_color)
 
+    _rose_col = wheel(CONFIDENCE_MIN_COL)
+
     # Map the input data to the ring steps.
     _data = map_ring_data(data)
 
     for i in range(RING_NUM_PIXELS):
+
         _col_r = int(round(_color[0]*_data[i]))
         _col_g = int(round(_color[1]*_data[i]))
         _col_b = int(round(_color[2]*_data[i]))
-        pixels[i] = (_col_r, _col_g, _col_b)
+
+        if(i%(RING_NUM_PIXELS//ROSE_POINTS) == 0):
+            _rose_pxl = (int(_rose_col[0]*ROSE_BRIGHTNESS), int(_rose_col[1]*ROSE_BRIGHTNESS), int(_rose_col[2]*ROSE_BRIGHTNESS))
+
+            if _data[i] < ROSE_BRIGHTNESS:
+                pixels[i] = _rose_pxl
+            else:
+                pixels[i] = (_col_r, _col_g, _col_b)
+        else:
+            pixels[i] = (_col_r, _col_g, _col_b)
+        
     
     # Maybe add this back in - set pixel of the peak bearing.
     # May not be necessary
@@ -242,6 +259,43 @@ def handle_bearing(data):
     display_power_value(_power)
 
 
+def handle_gps(data):
+    # Quick hack to display udp-broadcasted speed and heading data.
+
+    _speed = data['speed'] # Speed in KPH
+
+    print(data)
+    if 'heading' in data:
+        _heading = data['heading']
+    else:
+        _heading = None
+    
+    if _heading:
+        _heading_data = list(np.zeros(360))
+        _heading_data[int(_heading)] = 0.99
+        _heading_data = _heading_data[::-1]
+
+        _half_a = _heading_data[len(_heading_data)//2-1::-1]
+        _half_b = _heading_data[len(_heading_data)-1:len(_heading_data)//2-1:-1]
+        _heading_data = _half_a + _half_b
+
+        _confidence = CONFIDENCE_MAX # np.interp(_speed, [0,80], [CONFIDENCE_MIN, CONFIDENCE_MAX])
+
+        display_ring_data(_heading_data, _confidence)
+    else:
+        # Blank the ring
+        for i in range(0, RING_NUM_PIXELS):
+            pixels[i] = (0,0,0)
+        pixels.show()
+    
+    # Speed
+    _power = np.interp(_speed, [-1,80], [POWER_MIN, POWER_MAX])
+    display_power_value(_power)
+
+
+
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -258,9 +312,21 @@ if __name__ == "__main__":
         "--test", action="store_true", default=False, help="Verbose output."
     )
     parser.add_argument(
+        "--brightness", type=float, default=BRIGHTNESS, help="Initial Brightness setting."
+    )
+    parser.add_argument(
         "--hudmode", action="store_true", default=False, help="Enable HUD Mode"
     )
+    parser.add_argument(
+        "--rainbow", action="store_true", default=False, help="Enable Continuous Rainbow Mode"
+    )
+    parser.add_argument(
+        "--compass", action="store_true", default=False, help="Enable Compass Mode"
+    )
     args = parser.parse_args()
+
+    BRIGHTNESS = args.brightness
+    pixels.brightness = BRIGHTNESS
 
     if args.hudmode:
         HUD_MODE = True
@@ -268,9 +334,15 @@ if __name__ == "__main__":
     if args.test:
         while True:
             slow_test()
+    
+    if args.rainbow:
+        while True:
+            rainbow_cycle(wait_time=0.0005, num_pixels=TOTAL_NUM_PIXELS)
 
-
-    udp_listener = UDPListener(bearing_callback=handle_bearing, port=args.udp_port)
+    if args.compass:
+        udp_listener = UDPListener(gps_callback=handle_gps, port=args.udp_port)
+    else:
+        udp_listener = UDPListener(bearing_callback=handle_bearing, port=args.udp_port)
 
     # Do some rainbow cycling on startup.
     startup()
