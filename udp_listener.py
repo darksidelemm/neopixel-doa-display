@@ -110,3 +110,15 @@ class UDPListener(object):
     def close(self):
         self.udp_listener_running = False
         self.listener_thread.join()
+
+if __name__ == "__main__":
+    import sys
+
+    port = int(sys.argv[1])
+
+    def print_pkt(data):
+        print(data)
+    
+    u = UDPListener(callback=print_pkt, port=port)
+
+    u.start()

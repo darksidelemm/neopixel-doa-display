@@ -10,7 +10,9 @@ import time
 import board
 import neopixel
 import numpy as np
+import RPi.GPIO as GPIO
 from udp_listener import UDPListener
+from turbo import *
 
 #
 # Configuration Section
@@ -18,6 +20,13 @@ from udp_listener import UDPListener
 
 # GPIO to which the NeoPixels are Connected
 PIXEL_PIN = board.D18
+
+# GPIOs for Switches
+GPIO.setmode(GPIO.BCM)
+BRIGHTNESS_UP_PIN = 21
+BRIGHTNESS_DOWN_PIN = 20
+HUDMODE_PIN = 26
+COMPASS_PIN = 19
 
 # The number of NeoPixels in the main ring
 # This assumes the ring is configured with the pixels numbered in a clockwise direction,
@@ -34,17 +43,19 @@ PIXEL_ORDER = neopixel.RGB
 
 # HUD Mode - where the display is placed on the dashboard of a car and viewed via reflections from a windscreen.
 HUD_MODE = False
+COMPASS_MODE = False
 
 # Initial Brightness of the display.
 BRIGHTNESS = 0.1
 
 # Compass rose settings.
-ROSE_BRIGHTNESS = 0.04 # Relative brightness.
+ROSE_BRIGHTNESS = 0.1 # Relative brightness.
 ROSE_POINTS = 4 # Number of points
 
 # Maximum and Minimum brightness settings.
-MAX_BRIGHTNESS = 0.2
+MAX_BRIGHTNESS = 0.4
 MIN_BRIGHTNESS = 0.01
+BRIGHTNESS_STEP = 0.01
 
 # Color Settings for the Ring Display
 CONFIDENCE_MAX = 70
@@ -54,9 +65,18 @@ CONFIDENCE_MIN_COL = 255
 CLIP_VALUE = 0.7 # Fudge factor to make narrow beams show up well on the display.
 
 # Scale settings for the Power Scale
-POWER_MIN = 5
-POWER_MAX = 30
-POWER_COL = 1
+
+POWER_SCALE_1_MIN = 1
+POWER_SCALE_1_MAX = 30
+POWER_SCALE_1_COL = 1
+POWER_SCALE_2_MIN = 30
+POWER_SCALE_2_MAX = 60
+POWER_SCALE_2_COL = 200
+POWER_SCALE_3_MIN = 60
+POWER_SCALE_3_MAX = 100
+POWER_SCALE_3_COL = 160
+
+POWER_BRIGHTNESS = 0.3
 
 # 
 BEARING_COL = 80
@@ -112,6 +132,7 @@ def blank_pixels():
 
 def fade_to_black(steps=500, wait_time=0.001):
     """ Fade all the pixels to black """
+    global BRIGHTNESS
     if BRIGHTNESS == 0:
         return
     
@@ -132,10 +153,21 @@ def set_ring(color):
     pixels.show()
 
 
-def set_scale(color):
+def set_scale(color, brightness=1.0, show=True):
+    _pow_col = wheel(color & 255)
     for i in range(RING_NUM_PIXELS, TOTAL_NUM_PIXELS):
-        pixels[i] = wheel(color & 255)
-    pixels.show()
+        pixels[i] = (int(_pow_col[0]*brightness),int(_pow_col[1]*brightness),int(_pow_col[2]*brightness))
+
+    if show:
+        pixels.show()
+
+
+def clear_scale(show=False):
+    for i in range(RING_NUM_PIXELS, TOTAL_NUM_PIXELS):
+        pixels[i] = (0,0,0)
+
+    if show:
+        pixels.show()
 
 
 def map_ring_data(data):
@@ -157,7 +189,7 @@ def map_ring_data(data):
     return list(np.interp(output, [output.min()+CLIP_VALUE*_range, output.max()], [0.00, 1]))
 
 
-def display_ring_data(data, confidence=50, bearing=None, compassrose=True):
+def display_ring_data(data, confidence=50, bearing=None, compassrose=True, rose_points=ROSE_POINTS):
     """ Display an array of DoA score vs Bearing data, with a given confidence value. """
 
     # Map the confidence value to a color.
@@ -175,7 +207,7 @@ def display_ring_data(data, confidence=50, bearing=None, compassrose=True):
         _col_g = int(round(_color[1]*_data[i]))
         _col_b = int(round(_color[2]*_data[i]))
 
-        if(i%(RING_NUM_PIXELS//ROSE_POINTS) == 0):
+        if(i%(RING_NUM_PIXELS//rose_points) == 0):
             _rose_pxl = (int(_rose_col[0]*ROSE_BRIGHTNESS), int(_rose_col[1]*ROSE_BRIGHTNESS), int(_rose_col[2]*ROSE_BRIGHTNESS))
 
             if _data[i] < ROSE_BRIGHTNESS:
@@ -194,9 +226,11 @@ def display_ring_data(data, confidence=50, bearing=None, compassrose=True):
 
     pixels.show()
 
+
 def display_power_value(power):
     _range = np.linspace(POWER_MIN,POWER_MAX, SCALE_NUM_PIXELS)
 
+    _pow_col = wheel(POWER_COL)
 
     for x in range(SCALE_NUM_PIXELS):
         if HUD_MODE:
@@ -205,13 +239,49 @@ def display_power_value(power):
             _pxl = RING_NUM_PIXELS+x
 
         if power >= _range[x]:
-            pixels[_pxl] = wheel(POWER_COL)
+            pixels[_pxl] = (int(_pow_col[0]*POWER_BRIGHTNESS),int(_pow_col[1]*POWER_BRIGHTNESS),int(_pow_col[2]*POWER_BRIGHTNESS))
         else:
             pixels[_pxl] = (0,0,0)
     
     pixels.show()
 
+def display_power_value2(power):
 
+    if(power <= POWER_SCALE_1_MAX):
+        clear_scale(show=False)
+        _min = POWER_SCALE_1_MIN
+        _max = POWER_SCALE_1_MAX
+        _col = POWER_SCALE_1_COL
+    elif (power <= POWER_SCALE_2_MAX):
+        set_scale(POWER_SCALE_1_COL,brightness=POWER_BRIGHTNESS, show=False)
+        _min = POWER_SCALE_2_MIN
+        _max = POWER_SCALE_2_MAX
+        _col = POWER_SCALE_2_COL
+    elif (power <= POWER_SCALE_3_MAX):
+        set_scale(POWER_SCALE_2_COL,brightness=POWER_BRIGHTNESS, show=False)
+        _min = POWER_SCALE_3_MIN
+        _max = POWER_SCALE_3_MAX
+        _col = POWER_SCALE_3_COL
+    else:
+        set_scale(POWER_SCALE_3_COL, show=True)
+        return
+
+
+
+    _range = np.linspace(_min,_max, SCALE_NUM_PIXELS)
+
+    _pow_col = wheel(_col)
+
+    for x in range(SCALE_NUM_PIXELS):
+        if HUD_MODE:
+            _pxl = TOTAL_NUM_PIXELS-1-x
+        else:
+            _pxl = RING_NUM_PIXELS+x
+
+        if power >= _range[x]:
+            pixels[_pxl] = (int(_pow_col[0]*POWER_BRIGHTNESS),int(_pow_col[1]*POWER_BRIGHTNESS),int(_pow_col[2]*POWER_BRIGHTNESS))
+    
+    pixels.show()
 
 def slow_test():
     for i in range(0, TOTAL_NUM_PIXELS):
@@ -225,6 +295,24 @@ def slow_test():
     time.sleep(3)
 
 
+def test_cmap():
+    for i in range(0, RING_NUM_PIXELS):
+        _color = int(np.interp(i/RING_NUM_PIXELS, [0.0,1.0], [0,255]))
+        _color = wheel(_color)
+        pixels[i] = _color
+
+    pixels.show()
+    time.sleep(3)
+
+
+def test_power():
+    while True:
+        for i in range(0,100):
+            print(i)
+            display_power_value2(i)
+            time.sleep(0.5)
+
+
 def startup():
     """ Perform a Startup 'attract' display"""
     rainbow_cycle(wait_time=0.0005, num_pixels=TOTAL_NUM_PIXELS)
@@ -234,6 +322,12 @@ def startup():
 udp_listener = None
 
 def handle_bearing(data):
+    global COMPASS_MODE, HUD_MODE
+
+    print("Got bearing")
+    if COMPASS_MODE:
+        return
+
     _confidence = data['confidence']
     _bearing = data['bearing']
     _power = data['power'] # Power is roughly a SNR value.
@@ -256,10 +350,15 @@ def handle_bearing(data):
         _doa_data = _half_a + _half_b
 
     display_ring_data(_doa_data, _confidence, bearing=_bearing)
-    display_power_value(_power)
+    display_power_value2(_power)
 
 
 def handle_gps(data):
+    global COMPASS_MODE, HUD_MODE
+
+    if not COMPASS_MODE:
+        return
+
     # Quick hack to display udp-broadcasted speed and heading data.
 
     _speed = data['speed'] # Speed in KPH
@@ -281,19 +380,81 @@ def handle_gps(data):
 
         _confidence = CONFIDENCE_MAX # np.interp(_speed, [0,80], [CONFIDENCE_MIN, CONFIDENCE_MAX])
 
-        display_ring_data(_heading_data, _confidence)
-    else:
-        # Blank the ring
-        for i in range(0, RING_NUM_PIXELS):
-            pixels[i] = (0,0,0)
-        pixels.show()
+        display_ring_data(_heading_data, _confidence, rose_points=8)
     
     # Speed
-    _power = np.interp(_speed, [-1,80], [POWER_MIN, POWER_MAX])
-    display_power_value(_power)
+    #_power = np.interp(_speed, [-1,80], [POWER_MIN, POWER_MAX])
+    display_power_value2(_speed)
+
+handling_brightness = False
+
+def handle_brightness_up(a):
+    global handling_brightness, BRIGHTNESS
+
+    if handling_brightness:
+        return
+    
+    handling_brightness = True
+
+    print("Brightness Up")
+    if (BRIGHTNESS+BRIGHTNESS_STEP) < MAX_BRIGHTNESS:
+        BRIGHTNESS += BRIGHTNESS_STEP
+        print(f"New Brightness: {BRIGHTNESS}")
+        pixels.brightness = BRIGHTNESS
+
+    time.sleep(0.1)
+    handling_brightness = False
+
+def handle_brightness_down(a):
+    global handling_brightness, BRIGHTNESS
+
+    if handling_brightness:
+        return
+    
+    handling_brightness = True
+
+    print("Brightness Down")
+    if (BRIGHTNESS-BRIGHTNESS_STEP) > MIN_BRIGHTNESS:
+        BRIGHTNESS -= BRIGHTNESS_STEP
+        print(f"New Brightness: {BRIGHTNESS}")
+        pixels.brightness = BRIGHTNESS
+    
+    time.sleep(0.1)
+    handling_brightness = False
+
+
+def handle_hudmode(a):
+    global HUD_MODE
+    if(GPIO.input(HUDMODE_PIN)):
+        HUD_MODE = True
+        print("HUD Mode On")
+    else:
+        HUD_MODE = False
+        print("HUD Mode Off")
 
 
 
+def handle_compass(a):
+    global COMPASS_MODE
+    if(GPIO.input(COMPASS_PIN)):
+        print("Compass mode")
+        COMPASS_MODE = True
+    else:
+        print("Bearing mode")
+        COMPASS_MODE = False
+
+
+def setup_gpio():
+    GPIO.setup(BRIGHTNESS_UP_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(BRIGHTNESS_DOWN_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(HUDMODE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(COMPASS_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    time.sleep(0.5)
+    GPIO.add_event_detect(BRIGHTNESS_UP_PIN, GPIO.FALLING, callback=handle_brightness_up)
+    GPIO.add_event_detect(BRIGHTNESS_DOWN_PIN, GPIO.FALLING, callback=handle_brightness_down)
+    GPIO.add_event_detect(HUDMODE_PIN, GPIO.BOTH, callback=handle_hudmode)
+    GPIO.add_event_detect(COMPASS_PIN, GPIO.BOTH, callback=handle_compass)
+    
 
 
 if __name__ == "__main__":
@@ -303,13 +464,25 @@ if __name__ == "__main__":
         "-v", "--verbose", action="store_true", default=False, help="Verbose output."
     )
     parser.add_argument(
-        "--udp_port",
+        "--bearing_udp_port",
         type=int,
         default=55672,
-        help="UDP Port to listen for UDP messages on.",
+        help="UDP Port to listen for Bearing UDP messages on.",
     )
     parser.add_argument(
-        "--test", action="store_true", default=False, help="Verbose output."
+        "--gps_udp_port",
+        type=int,
+        default=55672,
+        help="UDP Port to listen for Compass UDP messages on.",
+    )
+    parser.add_argument(
+        "--testpixels", action="store_true", default=False, help="Test each pixel in sequence."
+    )
+    parser.add_argument(
+        "--testcmap", action="store_true", default=False, help="Test colormap."
+    )
+    parser.add_argument(
+        "--testpower", action="store_true", default=False, help="Test power scale."
     )
     parser.add_argument(
         "--brightness", type=float, default=BRIGHTNESS, help="Initial Brightness setting."
@@ -323,6 +496,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compass", action="store_true", default=False, help="Enable Compass Mode"
     )
+    parser.add_argument(
+        "--gpio", action="store_true", default=False, help="Use GPIO to set modes."
+    )
     args = parser.parse_args()
 
     BRIGHTNESS = args.brightness
@@ -330,31 +506,59 @@ if __name__ == "__main__":
 
     if args.hudmode:
         HUD_MODE = True
+    
 
-    if args.test:
+    COMPASS_MODE = args.compass
+
+    if args.gpio:
+        setup_gpio()
+        if(GPIO.input(COMPASS_PIN)):
+            COMPASS_MODE = True
+            print("Compass mode enabled!")
+        else:
+            COMPASS_MODE = False
+        
+        if(GPIO.input(HUDMODE_PIN)):
+            HUD_MODE = True
+            print("HUD mode enabled!")
+        else:
+            HUD_MODE = False
+
+
+    if args.testpixels:
         while True:
             slow_test()
-    
+
+    if args.testcmap:
+        while True:
+            test_cmap()
+
+    if args.testpower:
+        while True:
+            test_power()
+
     if args.rainbow:
         while True:
             rainbow_cycle(wait_time=0.0005, num_pixels=TOTAL_NUM_PIXELS)
 
-    if args.compass:
-        udp_listener = UDPListener(gps_callback=handle_gps, port=args.udp_port)
-    else:
-        udp_listener = UDPListener(bearing_callback=handle_bearing, port=args.udp_port)
+
+    gps_udp_listener = UDPListener(gps_callback=handle_gps, port=args.gps_udp_port)
+
+    bearing_udp_listener = UDPListener(bearing_callback=handle_bearing, port=args.bearing_udp_port)
 
     # Do some rainbow cycling on startup.
     startup()
 
-    udp_listener.start()
+    gps_udp_listener.start()
+    bearing_udp_listener.start()
 
     try:
         while True:
             time.sleep(1)
 
     except KeyboardInterrupt:
-        udp_listener.close()
+        gps_udp_listener.close()
+        bearing_udp_listener.close()
         fade_to_black(steps=100)
 
 
