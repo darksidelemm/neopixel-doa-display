@@ -4,6 +4,8 @@ A display for Kerberos-SDR Direction-of-Arrival data. Accepts DoA data via UDP b
 
 Apologies for the poor / limited documentation - this was very much a weekend project! 
 
+**Warning: Having a device with red and blue lights on your dashboard may get you into trouble in many places! Ensure the HUD display is not visible from outside the vehicle (e.g. with a shield around the LED face), or adjust the color-mapping to use colors which are allowed.**
+
 If you're after more information, contact me at: Mark Jessop - vk5qi (at) rfhead.net
 
 ## Features
