@@ -1,6 +1,8 @@
 # Neopixel-based Radio Direction-of-Arrival Display
 
-A display for Kerberos-SDR Direction-of-Arrival data. Accepts DoA data via UDP broadcast messages. See it in action here: https://www.youtube.com/watch?v=ZPM3dys5GAA
+A display for Kraken-SDR Direction-of-Arrival data. Accepts DoA data via UDP broadcast messages. See it in action here: https://www.youtube.com/watch?v=ZPM3dys5GAA
+
+**Updated 2022-07-12 to work with the output from krakensdr_doa, in particular the different ranges of confidence and reported power levels.**
 
 Apologies for the poor / limited documentation - this was very much a weekend project! 
 
@@ -11,7 +13,7 @@ If you're after more information, contact me at: Mark Jessop - vk5qi (at) rfhead
 ## Features
 
 ### DoA Mode
-Accepts bearing messages from a Kerberos-SDR instance (running my fork: https://github.com/darksidelemm/kerberossdr ) and displays the DoA solution on the ring display. Solution data is color coded based on the solution confidence 'score', moving from Red (low confidence) -> Purple -> Blue (high confidence). DoA data is expected on UDP port 55682, in the format described here: https://github.com/projecthorus/chasemapper#radio-direction-finding-support
+Accepts bearing messages from a kraken_doa instance (running my fork: https://github.com/darksidelemm/krakensdr_doa ) and displays the DoA solution on the ring display. Solution data is color coded based on the solution confidence 'score', moving from Red (low confidence) -> Purple -> Blue (high confidence). DoA data is expected on UDP port 55672, in the format described here: https://github.com/projecthorus/chasemapper#radio-direction-finding-support
 
 The LED strip is used to display SNR data, with the 8 LEDs illuminating depending on the SNR value. Again, color coding is used, with 0-30 dB represented by red LEDs, then 30-60 dB by a purple overlay. Run doa_ring.py with the `--testpower` argument to see how this operates.
 
