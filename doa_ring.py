@@ -339,7 +339,7 @@ def handle_bearing(data):
         _source = "unknown"
 
     # Reflect bearings direct from a kerberos-sdr across the N-S axis.
-    if _source == "kerberos-sdr":
+    if _source == "krakensdr_doa":
         _bearing = 360.0 - _bearing
         _doa_data = _doa_data[::-1]
 
