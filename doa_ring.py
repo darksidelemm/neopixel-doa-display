@@ -45,6 +45,8 @@ PIXEL_ORDER = neopixel.RGB
 HUD_MODE = False
 COMPASS_MODE = False
 
+HEADING_OK = True
+
 # Initial Brightness of the display.
 BRIGHTNESS = 0.1
 
@@ -198,6 +200,7 @@ def display_ring_data(data, confidence=50, bearing=None, compassrose=True, rose_
 
     _rose_col = wheel(CONFIDENCE_MIN_COL)
 
+
     # Map the input data to the ring steps.
     _data = map_ring_data(data)
 
@@ -207,7 +210,7 @@ def display_ring_data(data, confidence=50, bearing=None, compassrose=True, rose_
         _col_g = int(round(_color[1]*_data[i]))
         _col_b = int(round(_color[2]*_data[i]))
 
-        if(i%(RING_NUM_PIXELS//rose_points) == 0):
+        if(compassrose and (i%(RING_NUM_PIXELS//rose_points) == 0)):
             _rose_pxl = (int(_rose_col[0]*ROSE_BRIGHTNESS), int(_rose_col[1]*ROSE_BRIGHTNESS), int(_rose_col[2]*ROSE_BRIGHTNESS))
 
             if _data[i] < ROSE_BRIGHTNESS:
@@ -322,7 +325,7 @@ def startup():
 udp_listener = None
 
 def handle_bearing(data):
-    global COMPASS_MODE, HUD_MODE
+    global COMPASS_MODE, HUD_MODE, HEADING_OK
 
     print("Got bearing")
     if COMPASS_MODE:
@@ -349,12 +352,20 @@ def handle_bearing(data):
         _half_b = _doa_data[len(_doa_data)-1:len(_doa_data)//2-1:-1]
         _doa_data = _half_a + _half_b
 
-    display_ring_data(_doa_data, _confidence, bearing=_bearing)
+    display_ring_data(_doa_data, _confidence, compassrose=HEADING_OK, bearing=_bearing)
     display_power_value2(_power)
 
 
 def handle_gps(data):
-    global COMPASS_MODE, HUD_MODE
+    global COMPASS_MODE, HUD_MODE, HEADING_OK
+
+    if 'heading_status' in data:
+        if 'Ongoing' in data['heading_status']:
+            HEADING_OK = False
+        else:
+            HEADING_OK = True
+    else:
+        HEADING_OK = True
 
     if not COMPASS_MODE:
         return
@@ -380,11 +391,11 @@ def handle_gps(data):
 
         _confidence = CONFIDENCE_MAX # np.interp(_speed, [0,80], [CONFIDENCE_MIN, CONFIDENCE_MAX])
 
-        display_ring_data(_heading_data, _confidence, rose_points=8)
+        display_ring_data(_heading_data, _confidence, compassrose=HEADING_OK, rose_points=8)
     
     # Speed
-    #_power = np.interp(_speed, [-1,80], [POWER_MIN, POWER_MAX])
-    display_power_value2(_speed)
+    _power = np.interp(_speed, [-1,100], [POWER_SCALE_1_MIN, POWER_SCALE_3_MAX])
+    display_power_value2(_power)
 
 handling_brightness = False
 
